@@ -1,0 +1,61 @@
+# Router under test (AS 215011): BMP block and ImportFilter copied from
+# nxthdr/infrastructure templates/config/ixp/ixpcdg01/bird/bird.conf.j2.
+# Only difference: ROAs come from a static protocol instead of Cloudflare's RTR.
+router id 127.0.0.3;
+log "dut.log" all;
+
+protocol device { }
+
+# RPKI (same as nxthdr, except the ROA source)
+roa4 table r4;
+roa6 table r6;
+
+protocol static roas4 {
+  roa4 { table r4; };
+  route 198.51.100.0/24 max 24 as 64500;
+  route 203.0.113.0/24 max 24 as 64999;
+}
+
+protocol static roas6 {
+  roa6 { table r6; };
+  route 2001:db8:100::/48 max 48 as 64500;
+  route 2001:db8:200::/48 max 48 as 64999;
+}
+
+# BMP (same as nxthdr, local station)
+protocol bmp {
+    station address ip 127.0.0.1 port 4000;
+    monitoring rib in pre_policy;
+    monitoring rib in post_policy;
+}
+
+# Import filters (same as nxthdr)
+function is_rpki_invalid () -> bool {
+  return (roa_check(r4, net, bgp_path.last) = ROA_INVALID ||
+          roa_check(r6, net, bgp_path.last) = ROA_INVALID);
+}
+
+filter ImportFilter {
+    if is_rpki_invalid() then reject;
+    accept;
+}
+
+protocol bgp FranceIX1 {
+    local 127.0.0.3 as 215011;
+    neighbor 127.0.0.2 as 51706;
+    multihop;
+    strict bind on;
+    ipv4 {
+        @IMPORT_TABLE@
+        import keep filtered;
+        import filter ImportFilter;
+        export none;
+    };
+    ipv6 {
+        @IMPORT_TABLE@
+        import keep filtered;
+        import filter ImportFilter;
+        export none;
+        extended next hop on;
+    };
+}
